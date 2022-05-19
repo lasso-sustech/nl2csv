@@ -12,7 +12,8 @@ FILTER = {
     'RX_BYTES'   : re.compile('rx bytes:\s*(\d*)'),
     'RX_PACKETS' : re.compile('rx packets:\s*(\d*)'),
     'RX_BITRATE' : re.compile('rx bitrate:\s*.*MCS\s*(.*)'),
-    'SIGNAL_AVG' : re.compile('signal avg:\s*(-\d*)\s*dBm')
+    'SIGNAL_CHAIN' : re.compile('signal:\s*-\d+\s*\[(-\d+,\s+-\d+)\]\s+dBm')
+    #re.compile('signal avg:\s*(-\d*)\s*dBm')
 }
 
 def fetch_statistics(net_dev, sta_mac):
@@ -37,19 +38,23 @@ def main(args):
         writer.writerow(['timestamp', *list(FILTER.keys())])
         #
         with Halo('Collecting ...') as spinner:
-            counter, start_time = 0, time.time()
-            while(True):
-                timestamp  = time.time()
-                delta_time = time.time() - start_time
-                if delta_time >= args.omit:
-                    result = fetch_statistics(args.net_dev, args.sta_mac)
-                    writer.writerow([timestamp, *list(result.values())])
-                    counter += 1
-                #
-                elapsed_time = delta_time - args.omit
-                spinner.text = f'Time Elapsed: {elapsed_time:7.2f} s; {counter} Collected.'
-                #
-                time.sleep(0.01)
+            try:
+                counter, start_time = 0, time.time()
+                while(True):
+                    timestamp  = time.time()
+                    delta_time = time.time() - start_time
+                    if delta_time >= args.omit:
+                        result = fetch_statistics(args.net_dev, args.sta_mac)
+                        writer.writerow([timestamp, *list(result.values())])
+                        counter += 1
+                    #
+                    elapsed_time = delta_time - args.omit
+                    spinner.text = f'Time Elapsed: {elapsed_time:7.2f} s; {counter} Collected.'
+                    #
+                    time.sleep(0.01)
+            except Exception as e:
+                spinner.warn()
+                raise e
         pass
     
     pass
