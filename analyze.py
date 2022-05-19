@@ -106,11 +106,11 @@ def analyze_thru_vs_mcs(timestamp, rx_bytes, rx_packets, mcs_thru):
     # ax1_2.set_ylabel('Access Time Percentage')
 
     ## plot cdf
-    ax2.plot( *get_cdf(est_time_part), color='darkorange' )
+    ax2.plot( *get_cdf(est_time_part), color='blue' )
     ax2.plot( *get_cdf(time_part), color='green' )
     ax2.set_xlabel('Access Time')
     ax2.set_ylabel('CDF')
-    ax2.legend(['thru/MCS Estimation', 'Packet-based Estimation'])
+    ax2.legend(['Real-time / MCS-based', 'Packet-based Estimation'])
     ax2.set_ylabel('CDF')
     #
     # ax2_1 = ax2.twiny()
@@ -121,7 +121,7 @@ def analyze_thru_vs_mcs(timestamp, rx_bytes, rx_packets, mcs_thru):
     plt.show()
     pass
 
-def analyze_mcs_vs_rssi(timestamp, mcs_thru, sig_a, sig_b):
+def analyze_mcs_vs_rssi(timestamp, mcs_thru, mcs_idx, sig_a, sig_b):
     sig_min = [ min(*x) for x in zip(sig_a, sig_b) ]
     sig_max = [ max(*x) for x in zip(sig_a, sig_b) ]
 
@@ -147,14 +147,15 @@ def main(filename):
                 int(item[1]),   # RX_BYTES
                 int(item[2]),   # RX_PACKETS
                 HT20_MAP[item[3]],       # throughput
+                HT20_MAP.index(item[3]), # throughput index
                 int(item[4].strip('|')), # last RSSI of chain A 
                 int(item[5].strip('|')), # last RSSI of chain B
             ]
             result.append( item )
-        timestamp, rx_bytes, rx_packets, mcs_thru, sig_a, sig_b = list( zip(*result) )
+        timestamp, rx_bytes, rx_packets, mcs_thru, mcs_idx, sig_a, sig_b = list( zip(*result) )
 
         # analyze_thru_vs_mcs(timestamp, rx_bytes, rx_packets, mcs_thru)
-        analyze_mcs_vs_rssi(timestamp, mcs_thru, sig_a, sig_b)
+        analyze_mcs_vs_rssi(timestamp, mcs_thru, mcs_idx, sig_a, sig_b)
     pass
 
 if __name__=='__main__':
