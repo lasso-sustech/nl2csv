@@ -1,8 +1,17 @@
 #!/usr/bin/env python3
 import csv
+from tqdm import tqdm
 from sys import argv
 import numpy as np
 import matplotlib.pyplot as plt
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+from torch.utils.data import Dataset
+from torch.utils.data import DataLoader
+
+CUDA = lambda x: x.cuda()
 
 HT20_MAP = {
     '15 short GI': 144.4,
@@ -43,6 +52,49 @@ HT20_MAP = {
 
     ''  : 0.0
 }
+HT20_MAP_KEYS = list(HT20_MAP.keys())
+
+class CustomDataset(Dataset):
+    def __init__(self, inputs, labels):
+        self.inputs = inputs
+        self.labels = labels
+    
+    def __len__(self):
+        return len(self.inputs)
+    
+    def __getitem__(self, idx):
+        _input = torch.FloatTensor( self.inputs[idx] )
+        _label = self.labels[idx]
+        return _input, _label
+
+class Net(nn.Module):
+    def __init__(self):
+        super(Net, self).__init__()
+        self.layers = nn.Sequential(
+            nn.Linear(2, 330),
+            nn.ReLU(),
+            nn.Linear(330, 660),
+            nn.ReLU(),
+            nn.Linear(660, 1980),
+            nn.ReLU(),
+            nn.Linear(1980, 990),
+            nn.ReLU(),
+            #
+            nn.Linear(990, 330),
+            nn.ReLU(),
+            nn.Linear(330, 99),
+            nn.ReLU(),
+            nn.Linear(99, 66),
+            nn.ReLU(),
+            nn.Linear(66, 33),
+            nn.ReLU(),
+        )
+    
+    def forward(self, x):
+        return self.layers(x)
+    
+    pass
+
 
 def get_cdf(y):
     pmf_x = np.linspace( 0, np.max(y)*1.001, num=len(y) )
@@ -124,13 +176,55 @@ def analyze_thru_vs_mcs(timestamp, rx_bytes, rx_packets, mcs_thru):
 def analyze_mcs_vs_rssi(timestamp, mcs_thru, mcs_idx, sig_a, sig_b):
     sig_min = [ min(*x) for x in zip(sig_a, sig_b) ]
     sig_max = [ max(*x) for x in zip(sig_a, sig_b) ]
+    _inputs = list(zip(sig_min, sig_max))
+    _labels = mcs_idx
+
+    dataset = CustomDataset(_inputs, _labels)
+    dataloader = DataLoader(dataset, batch_size=128, shuffle=True)
+    ## training
+    net = Net()
+    try:
+        net.load_state_dict( torch.load('logs/latest.pth') )
+        net.eval()
+        print('Latest model loaded.')
+    except:
+        print('No latest model.')
+    finally:
+        net = CUDA(net)
+    loss_fn = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(net.parameters(), lr=1e-4)
+    #
+    pbar = tqdm(range(500))
+    for epoch in pbar:
+        current_loss = 0.0
+        for i, (_inputs,_labels) in enumerate(dataloader, 0):
+            _inputs, _labels = CUDA(_inputs), CUDA(_labels)
+            optimizer.zero_grad()
+            _outputs = net(_inputs)
+            #
+            _loss = loss_fn(_outputs, _labels)
+            _loss.backward()
+            optimizer.step()
+            #
+            current_loss += _loss.item()
+        pbar.set_description( f'Loss: {current_loss:.6f}' )
+    try:
+        torch.save(net.state_dict(), 'logs/latest.pth')
+        print('Latest model saved.')
+    except:
+        print('Model not saved.')
+    #
+    with torch.no_grad():
+        _preds = [ np.argmax( net(CUDA(x)).cpu() ).item() for x,_ in dataset ]
+        _values = [ HT20_MAP[HT20_MAP_KEYS[x]] for x in _preds ]
 
     fig, ax = plt.subplots()
     ax.plot(timestamp, mcs_thru, color='blue')
+    ax.plot(timestamp, _values, color='green')
     #
-    axp = ax.twinx()
-    axp.plot(timestamp, sig_max, color='red')
-    axp.plot(timestamp, sig_min, color='green')
+    # axp = ax.twinx()
+    # axp.plot(timestamp, sig_max, color='red')
+    # axp.plot(timestamp, sig_min, color='green')
 
     plt.show()
     pass
@@ -147,7 +241,7 @@ def main(filename):
                 int(item[1]),   # RX_BYTES
                 int(item[2]),   # RX_PACKETS
                 HT20_MAP[item[3]],       # throughput
-                HT20_MAP.index(item[3]), # throughput index
+                HT20_MAP_KEYS.index(item[3]), # throughput index
                 int(item[4].strip('|')), # last RSSI of chain A 
                 int(item[5].strip('|')), # last RSSI of chain B
             ]
