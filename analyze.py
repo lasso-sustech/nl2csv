@@ -122,6 +122,17 @@ def analyze_thru_vs_mcs(timestamp, rx_bytes, rx_packets, mcs_thru):
     pass
 
 def analyze_mcs_vs_rssi(timestamp, mcs_thru, sig_a, sig_b):
+    sig_min = [ min(*x) for x in zip(sig_a, sig_b) ]
+    sig_max = [ max(*x) for x in zip(sig_a, sig_b) ]
+
+    fig, ax = plt.subplots()
+    ax.plot(timestamp, mcs_thru, color='blue')
+    #
+    axp = ax.twinx()
+    axp.plot(timestamp, sig_max, color='red')
+    axp.plot(timestamp, sig_min, color='green')
+
+    plt.show()
     pass
 
 def main(filename):
@@ -142,8 +153,8 @@ def main(filename):
             result.append( item )
         timestamp, rx_bytes, rx_packets, mcs_thru, sig_a, sig_b = list( zip(*result) )
 
-        analyze_thru_vs_mcs(timestamp, rx_bytes, rx_packets, mcs_thru)
-        # analyze_mcs_vs_rssi(timestamp, sig_a, sig_b)
+        # analyze_thru_vs_mcs(timestamp, rx_bytes, rx_packets, mcs_thru)
+        analyze_mcs_vs_rssi(timestamp, mcs_thru, sig_a, sig_b)
     pass
 
 if __name__=='__main__':
