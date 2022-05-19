@@ -34,27 +34,23 @@ def main(args):
     Path('logs').mkdir(exist_ok=True)
 
     with open(filename, 'w') as fh:
-        writer = csv.writer(fh, delimiter=',', quotechar='|')
+        writer = csv.writer(fh, delimiter=',')
         writer.writerow(['timestamp', *list(FILTER.keys())])
         #
         with Halo('Collecting ...') as spinner:
-            try:
-                counter, start_time = 0, time.time()
-                while(True):
-                    timestamp  = time.time()
-                    delta_time = time.time() - start_time
-                    if delta_time >= args.omit:
-                        result = fetch_statistics(args.net_dev, args.sta_mac)
-                        writer.writerow([timestamp, *list(result.values())])
-                        counter += 1
-                    #
-                    elapsed_time = delta_time - args.omit
-                    spinner.text = f'Time Elapsed: {elapsed_time:7.2f} s; {counter} Collected.'
-                    #
-                    time.sleep(0.01)
-            except Exception as e:
-                spinner.warn()
-                raise e
+            counter, start_time = 0, time.time()
+            while(True):
+                timestamp  = time.time()
+                delta_time = time.time() - start_time
+                if delta_time >= args.omit:
+                    result = fetch_statistics(args.net_dev, args.sta_mac)
+                    writer.writerow([timestamp, *list(result.values())])
+                    counter += 1
+                #
+                elapsed_time = delta_time - args.omit
+                spinner.text = f'Time Elapsed: {elapsed_time:7.2f} s; {counter} Collected.'
+                #
+                time.sleep(0.01)
         pass
     
     pass
