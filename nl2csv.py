@@ -3,6 +3,7 @@ import re, time, csv
 import subprocess as sp
 from sys import argv
 from pathlib import Path
+from argparse import ArgumentParser
 from halo import Halo
 
 SHELL_RUN = lambda x: sp.run(x, stdout=sp.PIPE, stderr=sp.PIPE, check=True, shell=True)
@@ -14,8 +15,8 @@ FILTER = {
     'SIGNAL_AVG' : re.compile('signal avg:\s*(-\d*)\s*dBm')
 }
 
-def fetch_statistics(dev, mac_addr):
-    ret = SHELL_RUN( f'iw dev {dev} station get {mac_addr}' )
+def fetch_statistics(net_dev, sta_mac):
+    ret = SHELL_RUN( f'iw dev {net_dev} station get {sta_mac}' )
     _output = ret.stdout.decode()
     
     result = {}
@@ -26,9 +27,9 @@ def fetch_statistics(dev, mac_addr):
         pass
     return result
 
-def main(dev, mac_addr):
+def main(args):
     postfix = time.strftime('%Y_%m_%d_%H%M%S')
-    filename = f'logs/{dev}_{postfix}.csv'
+    filename = f'logs/{args.net_dev}_{postfix}.csv'
     Path('logs').mkdir(exist_ok=True)
 
     with open(filename, 'w') as fh:
@@ -38,24 +39,31 @@ def main(dev, mac_addr):
         with Halo('Collecting ...') as spinner:
             counter, start_time = 0, time.time()
             while(True):
-                timestamp = time.time()
-                result = fetch_statistics(dev, mac_addr)
-                writer.writerow([timestamp, *list(result.values())])
-                time.sleep(0.01)
+                timestamp  = time.time()
+                delta_time = time.time() - start_time
+                if delta_time >= args.omit:
+                    result = fetch_statistics(args.net_dev, args.sta_mac)
+                    writer.writerow([timestamp, *list(result.values())])
+                    counter += 1
                 #
-                counter += 1
-                time_delta = time.time() - start_time
-                spinner.text = f'Time Elapsed: {time_delta:7.2f} s; {counter} Collected.'
+                elapsed_time = delta_time - args.omit
+                spinner.text = f'Time Elapsed: {elapsed_time:7.2f} s; {counter} Collected.'
+                #
+                time.sleep(0.01)
         pass
     
     pass
 
 if __name__=='__main__':
     try:
-        if len(argv)!=3:
-            print('Usage: ./nl2csv <NET_DEV> <STA_MAC>')
-        else:
-            main( dev=argv[1], mac_addr=argv[2] )
+        parser = ArgumentParser(description='Nl80211 to CSV, Python version.')
+        parser.add_argument('net_dev', metavar='NET_DEV', help='e.g., wlp1s0.')
+        parser.add_argument('sta_mac', metavar='STA_MAC', help='MAC address of the associated STA.')
+        parser.add_argument('-O', '--omit', type=float, default=0.0,
+                            help='Omit the beginning period for logging (Unit: second).')
+        #
+        args = parser.parse_args()
+        main(args)
     except Exception as e:
         raise e
     finally:
