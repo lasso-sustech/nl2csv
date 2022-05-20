@@ -54,44 +54,41 @@ HT20_MAP = {
 }
 HT20_MAP_KEYS = list(HT20_MAP.keys())
 
+W_SIZE   = 25
+
 class CustomDataset(Dataset):
     def __init__(self, inputs, labels):
         self.inputs = inputs
         self.labels = labels
     
     def __len__(self):
-        return len(self.inputs)
+        return len(self.inputs) - W_SIZE + 1
     
     def __getitem__(self, idx):
-        _input = torch.FloatTensor( self.inputs[idx] )
-        _label = self.labels[idx]
+        _input = torch.FloatTensor( self.inputs[idx:idx+W_SIZE] )
+        _label = self.labels[idx+W_SIZE-1]
         return _input, _label
 
 class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
-        self.layers = nn.Sequential(
-            nn.Linear(2, 330),
-            nn.ReLU(),
-            nn.Linear(330, 660),
-            nn.ReLU(),
-            nn.Linear(660, 1980),
-            nn.ReLU(),
-            nn.Linear(1980, 990),
+        self.fc_block = nn.Sequential(
+            nn.Linear(2*W_SIZE, 2970),
             nn.ReLU(),
             #
+            nn.Linear(2970, 990),
+            nn.ReLU(),
             nn.Linear(990, 330),
             nn.ReLU(),
-            nn.Linear(330, 99),
-            nn.ReLU(),
-            nn.Linear(99, 66),
+            nn.Linear(330, 66),
             nn.ReLU(),
             nn.Linear(66, 33),
             nn.ReLU(),
         )
     
     def forward(self, x):
-        return self.layers(x)
+        x = torch.flatten(x, 1)
+        return self.fc_block(x)
     
     pass
 
@@ -129,6 +126,47 @@ def block_max(x, w):
         ret = ret[:-(w-_fix)]
     return ret.append(ret, ret[-1])
 
+def rssi_mcs_fitting(inputs, labels, training=True):
+    dataset = CustomDataset(inputs, labels)
+    dataloader = DataLoader(dataset, batch_size=128, shuffle=True)
+    net = Net()
+    try:
+        net.load_state_dict( torch.load('logs/latest.pth') )
+        net.eval()
+        print('Latest model loaded.')
+    except:
+        pass
+    finally:
+        net = CUDA(net)
+    
+    ## training
+    if training:
+        loss_fn = nn.CrossEntropyLoss()
+        optimizer = torch.optim.Adam(net.parameters(), lr=1e-5)
+        #
+        pbar = tqdm(range(500))
+        for epoch in pbar:
+            current_loss = 0.0
+            for i, (_inputs,_labels) in enumerate(dataloader, 0):
+                _inputs, _labels = CUDA(_inputs), CUDA(_labels)
+                optimizer.zero_grad()
+                _outputs = net(_inputs)
+                #
+                _loss = loss_fn(_outputs, _labels)
+                _loss.backward()
+                optimizer.step()
+                #
+                current_loss += _loss.item()
+            pbar.set_description( f'Loss: {current_loss:.6f}' )
+        try:
+            torch.save(net.state_dict(), 'logs/latest.pth')
+            print('Latest model saved.')
+        except:
+            print('Model not saved.')
+        pass
+    ##
+    return net, dataset
+
 def analyze_thru_vs_mcs(timestamp, rx_bytes, rx_packets, mcs_thru):
     acc_thru = np.diff(rx_bytes) / np.diff(timestamp) *(8/1E6)
     time_part = np.clip( acc_thru / mcs_thru[1:], 0.0, 1.0 )
@@ -146,8 +184,7 @@ def analyze_thru_vs_mcs(timestamp, rx_bytes, rx_packets, mcs_thru):
     ax1.legend(['MCS-based', 'Real-time', 'Estimated'])
 
     ## plot average accumulated throughput
-    # _w = 2
-    # smooth_thru = block_average(acc_thru, _w)
+    # smooth_thru = block_average(acc_thru, W_SIZE)
     # plt.plot(timestamp, smooth_thru, color='green')
 
     ## plot access-time driven throughput
@@ -160,7 +197,7 @@ def analyze_thru_vs_mcs(timestamp, rx_bytes, rx_packets, mcs_thru):
     ## plot cdf
     ax2.plot( *get_cdf(est_time_part), color='blue' )
     ax2.plot( *get_cdf(time_part), color='green' )
-    ax2.set_xlabel('Access Time')
+    ax2.set_xlabel('Access Time Portion')
     ax2.set_ylabel('CDF')
     ax2.legend(['Real-time / MCS-based', 'Packet-based Estimation'])
     ax2.set_ylabel('CDF')
@@ -176,57 +213,30 @@ def analyze_thru_vs_mcs(timestamp, rx_bytes, rx_packets, mcs_thru):
 def analyze_mcs_vs_rssi(timestamp, mcs_thru, mcs_idx, sig_a, sig_b):
     sig_min = [ min(*x) for x in zip(sig_a, sig_b) ]
     sig_max = [ max(*x) for x in zip(sig_a, sig_b) ]
-    _inputs = list(zip(sig_min, sig_max))
+    _inputs = list(zip(sig_a, sig_b))
     _labels = mcs_idx
 
-    dataset = CustomDataset(_inputs, _labels)
-    dataloader = DataLoader(dataset, batch_size=128, shuffle=True)
-    ## training
-    net = Net()
-    try:
-        net.load_state_dict( torch.load('logs/latest.pth') )
-        net.eval()
-        print('Latest model loaded.')
-    except:
-        print('No latest model.')
-    finally:
-        net = CUDA(net)
-    loss_fn = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(net.parameters(), lr=1e-4)
-    #
-    pbar = tqdm(range(500))
-    for epoch in pbar:
-        current_loss = 0.0
-        for i, (_inputs,_labels) in enumerate(dataloader, 0):
-            _inputs, _labels = CUDA(_inputs), CUDA(_labels)
-            optimizer.zero_grad()
-            _outputs = net(_inputs)
-            #
-            _loss = loss_fn(_outputs, _labels)
-            _loss.backward()
-            optimizer.step()
-            #
-            current_loss += _loss.item()
-        pbar.set_description( f'Loss: {current_loss:.6f}' )
-    try:
-        torch.save(net.state_dict(), 'logs/latest.pth')
-        print('Latest model saved.')
-    except:
-        print('Model not saved.')
-    #
-    with torch.no_grad():
-        _preds = [ np.argmax( net(CUDA(x)).cpu() ).item() for x,_ in dataset ]
-        _values = [ HT20_MAP[HT20_MAP_KEYS[x]] for x in _preds ]
+    
+    net, dataset = rssi_mcs_fitting(_inputs, _labels, training=True)    
+    ## testing
+    # with torch.no_grad():
+    #     x, _ = dataset[0]
+    #     print( net( CUDA(x) ).cpu() )
+    #     _preds = [ np.argmax( net(CUDA(x)).cpu() ).item() for x,_ in dataset ]
+    #     _values = [ HT20_MAP[HT20_MAP_KEYS[x]] for x in _preds ]
 
     fig, ax = plt.subplots()
-    ax.plot(timestamp, mcs_thru, color='blue')
-    ax.plot(timestamp, _values, color='green')
+    # ax.plot(timestamp, mcs_thru, color='blue')
+    # ax.plot(timestamp, _values, color='green')
+    ax.set_xlabel('Timestamp (second)')
+    ax.set_ylabel('Throughput (Mbps)')
     #
     # axp = ax.twinx()
     # axp.plot(timestamp, sig_max, color='red')
     # axp.plot(timestamp, sig_min, color='green')
+    # axp.set_ylabel('RSSI (dBm)')
 
-    plt.show()
+    # plt.show()
     pass
 
 def main(filename):
