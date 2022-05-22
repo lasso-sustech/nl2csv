@@ -126,7 +126,7 @@ def block_max(x, w):
         ret = ret[:-(w-_fix)]
     return ret.append(ret, ret[-1])
 
-def rssi_mcs_fitting(inputs, labels, training=True):
+def rssi_mcs_fitting(inputs, labels, training=True, lr=1e-4):
     dataset = CustomDataset(inputs, labels)
     dataloader = DataLoader(dataset, batch_size=128, shuffle=True)
     net = Net()
@@ -142,7 +142,7 @@ def rssi_mcs_fitting(inputs, labels, training=True):
     ## training
     if training:
         loss_fn = nn.CrossEntropyLoss()
-        optimizer = torch.optim.Adam(net.parameters(), lr=1e-4)
+        optimizer = torch.optim.Adam(net.parameters(), lr=lr)
         #
         pbar = tqdm(range(500))
         for epoch in pbar:
@@ -216,7 +216,7 @@ def analyze_mcs_vs_rssi(timestamp, mcs_thru, mcs_idx, sig_a, sig_b):
     _inputs = list(zip(sig_a, sig_b))
     _labels = mcs_idx
 
-    net, dataset = rssi_mcs_fitting(_inputs, _labels, training=True)    
+    net, dataset = rssi_mcs_fitting(_inputs, _labels, training=True, lr=1e-4)    
     ## testing
     with torch.no_grad():
         _values = []
@@ -231,11 +231,12 @@ def analyze_mcs_vs_rssi(timestamp, mcs_thru, mcs_idx, sig_a, sig_b):
     ax.plot(timestamp[W_SIZE-1:], _values, color='green')
     ax.set_xlabel('Timestamp (second)')
     ax.set_ylabel('Throughput (Mbps)')
-    ax.legend(['Real', 'Predicted'])
+    ax.legend(['MCS-based Throughput', 'DNN Predicted'])
     #
     # axp = ax.twinx()
-    # axp.plot(timestamp, sig_max, color='red')
-    # axp.plot(timestamp, sig_min, color='green')
+    # axp.plot(timestamp[W_SIZE-1:], sig_a[W_SIZE-1:], color='red')
+    # axp.plot(timestamp[W_SIZE-1:], sig_b[W_SIZE-1:], color='green')
+    # axp.legend(['RSSI from Chain A', 'RSSI from Chain B'])
     # axp.set_ylabel('RSSI (dBm)')
 
     plt.show()
