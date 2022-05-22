@@ -54,7 +54,7 @@ HT20_MAP = {
 }
 HT20_MAP_KEYS = list(HT20_MAP.keys())
 
-W_SIZE   = 25
+W_SIZE   = 50
 
 class CustomDataset(Dataset):
     def __init__(self, inputs, labels):
@@ -72,7 +72,8 @@ class CustomDataset(Dataset):
 class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
-        self.fc_block = nn.Sequential(
+        self.layers = nn.Sequential(
+            nn.Flatten(),
             nn.Linear(2*W_SIZE, 2970),
             nn.ReLU(),
             #
@@ -87,8 +88,7 @@ class Net(nn.Module):
         )
     
     def forward(self, x):
-        x = torch.flatten(x, 1)
-        return self.fc_block(x)
+        return self.layers(x)
     
     pass
 
@@ -142,7 +142,7 @@ def rssi_mcs_fitting(inputs, labels, training=True):
     ## training
     if training:
         loss_fn = nn.CrossEntropyLoss()
-        optimizer = torch.optim.Adam(net.parameters(), lr=1e-5)
+        optimizer = torch.optim.Adam(net.parameters(), lr=1e-4)
         #
         pbar = tqdm(range(500))
         for epoch in pbar:
@@ -216,27 +216,29 @@ def analyze_mcs_vs_rssi(timestamp, mcs_thru, mcs_idx, sig_a, sig_b):
     _inputs = list(zip(sig_a, sig_b))
     _labels = mcs_idx
 
-    
     net, dataset = rssi_mcs_fitting(_inputs, _labels, training=True)    
     ## testing
-    # with torch.no_grad():
-    #     x, _ = dataset[0]
-    #     print( net( CUDA(x) ).cpu() )
-    #     _preds = [ np.argmax( net(CUDA(x)).cpu() ).item() for x,_ in dataset ]
-    #     _values = [ HT20_MAP[HT20_MAP_KEYS[x]] for x in _preds ]
+    with torch.no_grad():
+        _values = []
+        for x,_ in dataset:
+            x = torch.unsqueeze(x, dim=0)
+            _pred  = np.argmax( net(CUDA(x)).cpu() ).item()
+            _value = HT20_MAP[ HT20_MAP_KEYS[_pred] ]
+            _values.append( _value )
 
     fig, ax = plt.subplots()
-    # ax.plot(timestamp, mcs_thru, color='blue')
-    # ax.plot(timestamp, _values, color='green')
+    ax.plot(timestamp[W_SIZE-1:], mcs_thru[W_SIZE-1:], color='blue')
+    ax.plot(timestamp[W_SIZE-1:], _values, color='green')
     ax.set_xlabel('Timestamp (second)')
     ax.set_ylabel('Throughput (Mbps)')
+    ax.legend(['Real', 'Predicted'])
     #
     # axp = ax.twinx()
     # axp.plot(timestamp, sig_max, color='red')
     # axp.plot(timestamp, sig_min, color='green')
     # axp.set_ylabel('RSSI (dBm)')
 
-    # plt.show()
+    plt.show()
     pass
 
 def main(filename):
