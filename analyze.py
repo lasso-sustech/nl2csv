@@ -8,12 +8,6 @@ import numba
 from numba import prange
 import numpy as np
 import matplotlib.pyplot as plt
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as optim
-from torch.utils.data import Dataset
-from torch.utils.data import DataLoader
 
 CUDA = lambda x: x.cuda()
 
@@ -60,42 +54,6 @@ HT20_MAP_KEYS = list(HT20_MAP.keys())
 
 W_SIZE   = 50
 
-class CustomDataset(Dataset):
-    def __init__(self, inputs, labels):
-        self.inputs = inputs
-        self.labels = labels
-    
-    def __len__(self):
-        return len(self.inputs) - W_SIZE + 1
-    
-    def __getitem__(self, idx):
-        _input = torch.FloatTensor( self.inputs[idx:idx+W_SIZE] )
-        _label = self.labels[idx+W_SIZE-1]
-        return _input, _label
-
-class Net(nn.Module):
-    def __init__(self):
-        super(Net, self).__init__()
-        self.layers = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(2*W_SIZE, 2970),
-            nn.ReLU(),
-            #
-            nn.Linear(2970, 990),
-            nn.ReLU(),
-            nn.Linear(990, 330),
-            nn.ReLU(),
-            nn.Linear(330, 66),
-            nn.ReLU(),
-            nn.Linear(66, 33),
-            nn.ReLU(),
-        )
-    
-    def forward(self, x):
-        return self.layers(x)
-    
-    pass
-
 @numba.jit(parallel=True)
 def _get_cdf(y, pmf_x):
     pmf_y = np.zeros(len(y))
@@ -136,6 +94,47 @@ def block_max(x, w):
     return ret.append(ret, ret[-1])
 
 def rssi_mcs_fitting(inputs, labels, training=True, lr=1e-4):
+    import torch
+    import torch.nn as nn
+    from torch.utils.data import Dataset
+    from torch.utils.data import DataLoader
+
+    class CustomDataset(Dataset):
+        def __init__(self, inputs, labels):
+            self.inputs = inputs
+            self.labels = labels
+        
+        def __len__(self):
+            return len(self.inputs) - W_SIZE + 1
+        
+        def __getitem__(self, idx):
+            _input = torch.FloatTensor( self.inputs[idx:idx+W_SIZE] )
+            _label = self.labels[idx+W_SIZE-1]
+            return _input, _label
+
+    class Net(nn.Module):
+        def __init__(self):
+            super(Net, self).__init__()
+            self.layers = nn.Sequential(
+                nn.Flatten(),
+                nn.Linear(2*W_SIZE, 2970),
+                nn.ReLU(),
+                #
+                nn.Linear(2970, 990),
+                nn.ReLU(),
+                nn.Linear(990, 330),
+                nn.ReLU(),
+                nn.Linear(330, 66),
+                nn.ReLU(),
+                nn.Linear(66, 33),
+                nn.ReLU(),
+            )
+        
+        def forward(self, x):
+            return self.layers(x)
+        
+        pass
+
     dataset = CustomDataset(inputs, labels)
     dataloader = DataLoader(dataset, batch_size=128, shuffle=True)
     net = Net()
@@ -220,6 +219,8 @@ def analyze_thru_vs_mcs(timestamp, rx_bytes, rx_packets, mcs_thru):
     pass
 
 def analyze_mcs_vs_rssi(timestamp, mcs_thru, mcs_idx, sig_a, sig_b):
+    import torch
+
     sig_min = [ min(*x) for x in zip(sig_a, sig_b) ]
     sig_max = [ max(*x) for x in zip(sig_a, sig_b) ]
     _inputs = list(zip(sig_a, sig_b))
