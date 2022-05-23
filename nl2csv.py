@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import re, time, csv
+import re, time, csv, json
 import subprocess as sp
 from sys import argv
 from pathlib import Path
@@ -32,6 +32,16 @@ def main(args):
     postfix = time.strftime('%Y_%m_%d_%H%M%S')
     filename = f'logs/{args.net_dev}_{postfix}.csv'
     Path('logs').mkdir(exist_ok=True)
+
+    with open('logs/logs.json', 'a') as fd:
+        try:
+            desc_map = json.load(fd)
+        except:
+            desc_map = dict()
+        _key = filename.lstrip('logs/')
+        desc_map[_key] = {'name':'', 'desc':''}
+        json.dump(desc_map, fd, indent=4)
+        pass
 
     with open(filename, 'w') as fh:
         writer = csv.writer(fh, delimiter=',')

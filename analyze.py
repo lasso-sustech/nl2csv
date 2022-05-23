@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
-import csv
+import csv, json
+from importlib.resources import path
+from pathlib import Path
 from tqdm import tqdm
 from sys import argv
+import numba
+from numba import prange
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
@@ -92,14 +96,19 @@ class Net(nn.Module):
     
     pass
 
+@numba.jit(parallel=True)
+def _get_cdf(y, pmf_x):
+    pmf_y = np.zeros(len(y))
+    #
+    for i in prange(1,len(y)):
+        pmf_y[i] = np.logical_and( y>=pmf_x[i-1], y<pmf_x[i] ).sum()
+    cdf_y = np.cumsum(pmf_y) / len(y)
+    return cdf_y
 
 def get_cdf(y):
     pmf_x = np.linspace( 0, np.max(y)*1.001, num=len(y) )
-    pmf_y = np.zeros(len(y))
-    #
-    for i in range(1,len(y)):
-        pmf_y[i] = np.logical_and( y>=pmf_x[i-1], y<pmf_x[i] ).sum()
-    cdf_y = np.cumsum(pmf_y) / len(y)
+    cdf_y = _get_cdf(y, pmf_x)
+    
     return (pmf_x, cdf_y)
 
 def moving_average(x, w):
@@ -169,11 +178,11 @@ def rssi_mcs_fitting(inputs, labels, training=True, lr=1e-4):
 
 def analyze_thru_vs_mcs(timestamp, rx_bytes, rx_packets, mcs_thru):
     acc_thru = np.diff(rx_bytes) / np.diff(timestamp) *(8/1E6)
-    time_part = np.clip( acc_thru / mcs_thru[1:], 0.0, 1.0 )
+    time_part = np.clip( np.nan_to_num(acc_thru / mcs_thru[1:]), 0.0, 1.0 )
     _pkt_thru = np.diff(rx_packets) / np.diff(timestamp)
     est_time_part = _pkt_thru / _pkt_thru.max()
     est_thru  = est_time_part * mcs_thru[1:]
-    
+
     fig, (ax1,ax2) = plt.subplots(2,1)
     ## plot throughput comparison
     ax1.plot(timestamp, mcs_thru, color='darkorange')
@@ -242,35 +251,71 @@ def analyze_mcs_vs_rssi(timestamp, mcs_thru, mcs_idx, sig_a, sig_b):
     plt.show()
     pass
 
-def main(filename):
-    with open(filename) as fh:
-        reader = csv.reader(fh, delimiter=',')
-        _title = next(reader)
-        
-        result = []
-        for item in reader:
-            item = [
-                float(item[0]), #timestamp,
-                int(item[1]),   # RX_BYTES
-                int(item[2]),   # RX_PACKETS
-                HT20_MAP[item[3]],       # throughput
-                HT20_MAP_KEYS.index(item[3]), # throughput index
-                int(item[4].strip('|')), # last RSSI of chain A 
-                int(item[5].strip('|')), # last RSSI of chain B
-            ]
-            result.append( item )
-        timestamp, rx_bytes, rx_packets, mcs_thru, mcs_idx, sig_a, sig_b = list( zip(*result) )
+def compare_access_time_cdf(results, names=[]):
+    cdf_list = []
+    for _result in results:
+        timestamp, rx_bytes, _, mcs_thru, _, _, _ = list( zip(*_result) )
+        acc_thru  = np.diff(rx_bytes) / np.diff(timestamp) *(8/1E6)
+        time_part = np.clip( np.nan_to_num(acc_thru / mcs_thru[1:]), 0.0, 1.0 )
+        cdf_list.append( get_cdf(time_part) )
+    #
+    fig, ax = plt.subplots()
+    for x in cdf_list:
+        ax.plot( *x )
+    #
+    ax.legend(names)
+    ax.set_xlabel('Access Time Portion')
+    ax.set_ylabel('CDF')
+    ax.set_title('')
+    plt.show()
+    pass
 
-        # analyze_thru_vs_mcs(timestamp, rx_bytes, rx_packets, mcs_thru)
-        analyze_mcs_vs_rssi(timestamp, mcs_thru, mcs_idx, sig_a, sig_b)
+def main(file_names):
+    results = []
+    for filename in file_names:
+        with open(filename) as fh:
+            reader = csv.reader(fh, delimiter=',')
+            _title = next(reader)
+            #
+            _result = []
+            for item in reader:
+                item = [
+                    float(item[0]), #timestamp,
+                    int(item[1]),   # RX_BYTES
+                    int(item[2]),   # RX_PACKETS
+                    HT20_MAP[item[3]],       # throughput
+                    HT20_MAP_KEYS.index(item[3]), # throughput index
+                    int(item[4].split(',')[0]), # last RSSI of chain A 
+                    int(item[4].split(',')[1]), # last RSSI of chain B
+                ]
+                _result.append( item )
+        results.append( _result )
+
+    if len(results)==1:
+        timestamp, rx_bytes, rx_packets, mcs_thru, mcs_idx, sig_a, sig_b = list( zip(*results[0]) )
+        analyze_thru_vs_mcs(timestamp, rx_bytes, rx_packets, mcs_thru)
+        # analyze_mcs_vs_rssi(timestamp, mcs_thru, mcs_idx, sig_a, sig_b)
+    else:
+        _names = []
+        for _file in file_names:
+            _folder_name, _file_name = Path(_file).parent, Path(_file).name
+            if Path(_folder_name, 'logs.json').exists():
+                with open( Path(_folder_name, 'logs.json') ) as fd:
+                    desc_map = json.load(fd)
+                    _names.append( desc_map[_file_name]['name'] )
+            else:
+                _names.append( _file_name )
+        compare_access_time_cdf(results, _names)
+        pass
+
     pass
 
 if __name__=='__main__':
     try:
         if len(argv)<2:
-            print('Usage: ./analyze.py <csv_file>')
+            print('Usage: ./analyze.py <csv_files>')
         else:
-            main(argv[1])
+            main(argv[1:])
     except Exception as e:
         raise e
     finally:
