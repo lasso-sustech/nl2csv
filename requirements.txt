@@ -2,3 +2,4 @@ halo
 termcolor
 numpy
 matplotlib
+numba

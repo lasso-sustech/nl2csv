@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import csv, json
-from importlib.resources import path
 from pathlib import Path
 from tqdm import tqdm
 from sys import argv
